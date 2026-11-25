@@ -5,13 +5,67 @@ on:
     # सोमवार से शुक्रवार, सुबह 3:00 AM UTC = 8:30 AM IST
     - cron: '0 3 * * 1-5'
   workflow_dispatch:
+    inputs:
+      test_date:
+        description: 'टेस्टिंग के लिए तारीख (YYYY-MM-DD, खाली छोड़ें तो आज की IST तारीख लेगा)'
+        required: false
+        default: ''
+      force_run:
+        description: 'छुट्टी होने पर भी जबरदस्ती चलाएं? (जैसे Muhurat Trading)'
+        type: boolean
+        required: false
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ==========================================
+  # Job 1: Gatekeeper (केवल ~5 सेकंड लेता है)
+  # ==========================================
+  check_holiday:
+    name: Check NSE Holiday
+    runs-on: ubuntu-latest
+    outputs:
+      is_holiday: ${{ steps.holiday_check.outputs.is_holiday }}
+      holiday_name: ${{ steps.holiday_check.outputs.holiday_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if today is an NSE Holiday (IST)
+        id: holiday_check
+        run: |
+          # अगर मैनुअल test_date दी गई है तो वह लें, वरना आज की भारतीय तारीख (IST) निकालें
+          if [ -n "${{ inputs.test_date }}" ]; then
+            CHECK_DATE="${{ inputs.test_date }}"
+          else
+            CHECK_DATE=$(TZ='Asia/Kolkata' date +%Y-%m-%d)
+          fi
+
+          echo "जांची जा रही तारीख (IST): $CHECK_DATE"
+
+          # jq से JSON में तारीख खोजें
+          HOLIDAY_NAME=$(jq -r --arg d "$CHECK_DATE" '.[$d] // empty' config/nse_holidays.json)
+
+          if [ -n "$HOLIDAY_NAME" ]; then
+            echo "is_holiday=true" >> $GITHUB_OUTPUT
+            echo "holiday_name=$HOLIDAY_NAME" >> $GITHUB_OUTPUT
+            echo "🏖️ आज NSE की छुट्टी है ($HOLIDAY_NAME) — प्री-मार्केट जॉब स्किप किया जाएगा।" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "is_holiday=false" >> $GITHUB_OUTPUT
+            echo "✅ आज सामान्य ट्रेडिंग दिवस है ($CHECK_DATE)।"
+          fi
+
+  # ==========================================
+  # Job 2: मुख्य Rust प्री-मार्केट जॉब
+  # ==========================================
   pre_market_report:
     name: Run Rust Pre-Market Check
+    needs: check_holiday
+    # तभी चलेगा जब छुट्टी न हो, या यूज़र ने force_run=true चुना हो
+    if: needs.check_holiday.outputs.is_holiday != 'true' || inputs.force_run == true
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +78,6 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      # Rust बाइनरी चलाना (यही रिपोर्ट बनाएगा और Telegram पर भेजेगा)
       - name: Execute Pre-Market Rust Check & Send Telegram
         env:
           BROKER_API_KEY: ${{ secrets.BROKER_API_KEY }}
@@ -42,7 +95,6 @@ jobs:
           path: reports/pre_market_report.md
           retention-days: 7
 
-      # सुरक्षा जाल: अगर ऊपर का कोई भी स्टेप फेल हो जाए, तो Telegram पर अलर्ट भेजें
       - name: Notify Telegram on Failure
         if: failure()
         env:
@@ -52,4 +104,4 @@ jobs:
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d parse_mode="HTML" \
-            -d text="🚨 <b>Pre-Market Bot फेल हो गया!</b>%0Aकृपया GitHub Actions लॉग्स जांचें:%0Ahttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            -d text="🚨 <b>Pre-Market Bot फेल हो गया!</b>%0Aलॉग्स जांचें: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
