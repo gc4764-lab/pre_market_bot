@@ -4,7 +4,6 @@ on:
   schedule:
     # सोमवार से शुक्रवार, सुबह 3:00 AM UTC = 8:30 AM IST
     - cron: '0 3 * * 1-5'
-  # मैनुअल टेस्टिंग के लिए GitHub UI में "Run workflow" बटन जोड़ता है
   workflow_dispatch:
 
 env:
@@ -16,32 +15,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. कोड डाउनलोड करना
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Rust इंस्टॉल करना
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # 3. Cargo dependencies को cache करना (ताकि हर सुबह बिल्ड तेज़ चले)
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      # 4. Rust बाइनरी चलाना और रिपोर्ट जनरेट करना
-      - name: Execute Pre-Market Rust Check
+      # Rust बाइनरी चलाना (यही रिपोर्ट बनाएगा और Telegram पर भेजेगा)
+      - name: Execute Pre-Market Rust Check & Send Telegram
         env:
           BROKER_API_KEY: ${{ secrets.BROKER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: cargo run --release
 
-      # 5. रिपोर्ट को सीधे GitHub Actions के Summary पेज पर दिखाना
       - name: Publish Report to Job Summary
         run: cat reports/pre_market_report.md >> $GITHUB_STEP_SUMMARY
 
-      # 6. रिपोर्ट को 7 दिनों के लिए डाउनलोड करने योग्य Artifact के रूप में सेव करना
       - name: Upload Report Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pre-market-report-${{ github.run_id }}
           path: reports/pre_market_report.md
           retention-days: 7
+
+      # सुरक्षा जाल: अगर ऊपर का कोई भी स्टेप फेल हो जाए, तो Telegram पर अलर्ट भेजें
+      - name: Notify Telegram on Failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d parse_mode="HTML" \
+            -d text="🚨 <b>Pre-Market Bot फेल हो गया!</b>%0Aकृपया GitHub Actions लॉग्स जांचें:%0Ahttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
