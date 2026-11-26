@@ -1,0 +1,39 @@
+name: Auto Release
+
+on:
+  push:
+    tags:
+      - 'v*' # जब भी v से शुरू होने वाला कोई टैग (जैसे v1.0.0) पुश होगा
+
+permissions:
+  contents: write # Release बनाने और फाइल अपलोड करने की अनुमति
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. रिपॉजिटरी का कोड चेकआउट करें
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. टूलचेन सेटअप करें (उदाहरण: Rust)
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 3. Release बाइनरी बिल्ड करें
+      - name: Build release binary
+        run: cargo build --release
+
+      # 4. बाइनरी को पैक करें (ताकि डाउनलोड आसान हो)
+      - name: Package binary
+        run: |
+          cp target/release/my-app ./my-app-linux-x64
+          tar -czvf my-app-linux-x64.tar.gz my-app-linux-x64
+
+      # 5. GitHub Release बनाएं और फाइल अपलोड करें
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: my-app-linux-x64.tar.gz
+          generate_release_notes: true # Commits से अपने आप Changelog बना देगा
