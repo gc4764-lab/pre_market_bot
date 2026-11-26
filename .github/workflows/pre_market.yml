@@ -89,7 +89,7 @@ jobs:
         run: cat reports/pre_market_report.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Report Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pre-market-report-${{ github.run_id }}
           path: reports/pre_market_report.md
