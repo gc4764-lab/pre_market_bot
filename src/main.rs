@@ -1,9 +1,9 @@
 use chrono::{FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
-use std::fmt::Write as _;
 use std::time::Duration;
 
 const GAP_THRESHOLD_PCT: f64 = 2.0;
@@ -22,8 +22,6 @@ struct TelegramPayload<'a> {
     parse_mode: &'a str,
 }
 
-
-
 fn calculate_gap_percent(prev_close: f64, pre_open: f64) -> Option<f64> {
     if !(prev_close.is_finite() && pre_open.is_finite()) || prev_close <= 0.0 {
         return None;
@@ -41,34 +39,42 @@ fn evaluate_status(gap_pct: f64) -> &'static str {
     }
 }
 
-
-
-
-
-
 async fn fetch_pre_market_data(
     client: &reqwest::Client,
-    api_key: &str,
+    _api_key: &str,
 ) -> Result<Vec<StockSnapshot>, Box<dyn std::error::Error>> {
-
-
-    
     // Health check WITHOUT leaking the credential:
-let health_res = client.get("https://httpbin.org/status/200").send().await?
-    .error_for_status()?;
+    let health_res = client
+        .get("https://httpbin.org/status/200")
+        .send()
+        .await?
+        .error_for_status()?;
 
-
-
-    
     if !health_res.status().is_success() {
         return Err(format!("API हेल्थ चेक फेल: HTTP {}", health_res.status()).into());
     }
 
     Ok(vec![
-        StockSnapshot { symbol: "RELIANCE".into(), prev_close: 2950.0, pre_open_price: 2968.0 },
-        StockSnapshot { symbol: "TCS".into(),      prev_close: 4100.0, pre_open_price: 4195.0 },
-        StockSnapshot { symbol: "HDFCBANK".into(), prev_close: 1650.0, pre_open_price: 1605.0 },
-        StockSnapshot { symbol: "INFY".into(),     prev_close: 1820.0, pre_open_price: 1826.5 },
+        StockSnapshot {
+            symbol: "RELIANCE".into(),
+            prev_close: 2950.0,
+            pre_open_price: 2968.0,
+        },
+        StockSnapshot {
+            symbol: "TCS".into(),
+            prev_close: 4100.0,
+            pre_open_price: 4195.0,
+        },
+        StockSnapshot {
+            symbol: "HDFCBANK".into(),
+            prev_close: 1650.0,
+            pre_open_price: 1605.0,
+        },
+        StockSnapshot {
+            symbol: "INFY".into(),
+            prev_close: 1820.0,
+            pre_open_price: 1826.5,
+        },
     ])
 }
 
@@ -99,9 +105,6 @@ async fn send_telegram_report(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
-    
-    
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent("premarket-reporter/0.1")
@@ -122,43 +125,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tg_msg = format!("<b>📊 प्री-मार्केट रिपोर्ट</b>\n<i>{}</i>\n\n", timestamp);
 
     let mut high_volatility_count = 0;
-/*
+
     for stock in &stocks {
-        let gap = calculate_gap_percent(stock.prev_close, stock.pre_open_price);
+        let Some(gap) = calculate_gap_percent(stock.prev_close, stock.pre_open_price) else {
+            writeln!(
+                md_report,
+                "| **{}** | — | — | — | ❓ Invalid data |",
+                stock.symbol
+            )?;
+            continue;
+        };
         let status = evaluate_status(gap);
-        if gap.abs() >= 2.0 {
+        if gap.abs() >= GAP_THRESHOLD_PCT {
             high_volatility_count += 1;
         }
-
-        // Markdown पंक्ति
-        md_report.push_str(&format!(
-            "| **{}** | {:.2} | {:.2} | {:+.2}% | {} |\n",
+        writeln!(
+            md_report,
+            "| **{}** | {:.2} | {:.2} | {:+.2}% | {} |",
             stock.symbol, stock.prev_close, stock.pre_open_price, gap, status
-        ));
-
-        // Telegram HTML ब्लॉक
-        tg_msg.push_str(&format!(
-            "<b>{}</b>: ₹{:.2} → ₹{:.2} (<code>{:+.2}%</code>)\n{}\n\n",
+        )?;
+        writeln!(
+            tg_msg,
+            "<b>{}</b>: ₹{:.2} → ₹{:.2} (<code>{:+.2}%</code>)\n{}\n",
             stock.symbol, stock.prev_close, stock.pre_open_price, gap, status
-        ));
+        )?;
     }
-
-
-*/
-    for stock in &stocks {
-    let Some(gap) = calculate_gap_percent(stock.prev_close, stock.pre_open_price) else {
-        writeln!(md_report, "| **{}** | — | — | — | ❓ Invalid data |", stock.symbol)?;
-        continue;
-    };
-    let status = evaluate_status(gap);
-    if gap.abs() >= GAP_THRESHOLD_PCT {
-        high_volatility_count += 1;
-    }
-    writeln!(md_report, "| **{}** | {:.2} | {:.2} | {:+.2}% | {} |",
-             stock.symbol, stock.prev_close, stock.pre_open_price, gap, status)?;
-    writeln!(tg_msg, "<b>{}</b>: ₹{:.2} → ₹{:.2} (<code>{:+.2}%</code>)\n{}\n",
-             stock.symbol, stock.prev_close, stock.pre_open_price, gap, status)?;
-}
 
     let footer = format!(
         "कुल स्टॉक्स: {} | हाई-गैप अलर्ट्स: {}",
